@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Tutting Simulator MVP</title>
+    <style>
+        :root {
+            --bg-glass: rgba(30, 30, 40, 0.65);
+            --border-glass: rgba(255, 255, 255, 0.12);
+            --text-main: #f3f4f6;
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0a0a0f;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* 讀取中遮罩 */
+        #loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0a0a0f;
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+            transition: opacity 0.5s ease;
+            font-size: 1.2rem;
+            letter-spacing: 0.1rem;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-left-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 置底居中玻璃擬態 UI 面板 */
+        .ui-panel {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            width: 90%;
+            max-width: 640px;
+            background: var(--bg-glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .ui-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-glass);
+            padding-bottom: 10px;
+        }
+
+        .ui-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: 0.05rem;
+            color: #fff;
+        }
+
+        .ui-tips {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            text-align: right;
+            line-height: 1.4;
+        }
+
+        .control-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        @media (max-width: 480px) {
+            .control-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05rem;
+            color: #9ca3af;
+        }
+
+        select {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid var(--border-glass);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text-main);
+            font-size: 0.9rem;
+            outline: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        .btn-group {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid var(--border-glass);
+            border-radius: 8px;
+            padding: 10px;
+            color: var(--text-main);
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+    </style>
+
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loading-text">正在載入 3D 機器人模型...</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <div class="ui-panel">
+        <div class="ui-header">
+            <div class="ui-title">Tutting Simulator MVP</div>
+            <div class="ui-tips">
+                滑鼠左鍵：旋轉視角 / 控制軸<br>
+                滑鼠右鍵：平移視角
+            </div>
+        </div>
+
+        <div class="control-row">
+            <div class="control-group">
+                <label for="joint-select">選擇控制關節 (FK)</label>
+                <select id="joint-select">
+                    <option value="none">-- 請選擇關節 --</option>
+                    <optgroup label="右手臂 (Right Arm)">
+                        <option value="mixamorigRightArm">右肩 (Shoulder)</option>
+                        <option value="mixamorigRightForeArm">右手肘 (Elbow)</option>
+                        <option value="mixamorigRightHand">右手腕 (Wrist)</option>
+                    </optgroup>
+                    <optgroup label="左手臂 (Left Arm)">
+                        <option value="mixamorigLeftArm">左肩 (Shoulder)</option>
+                        <option value="mixamorigLeftForeArm">左手肘 (Elbow)</option>
+                        <option value="mixamorigLeftHand">左手腕 (Wrist)</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>相機視角切換</label>
+                <div class="btn-group">
+                    <button id="btn-front">正面</button>
+                    <button id="btn-side">側面</button>
+                    <button id="btn-top">俯視</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // --- 全域變數定義 ---
+        let container, scene, camera, renderer;
+        let orbitControls, transformControls;
+        let robotModel = null;
+        
+        // 骨骼節點映射表
+        const joints = {
+            mixamorigRightArm: null,
+            mixamorigRightForeArm: null,
+            mixamorigRightHand: null,
+            mixamorigLeftArm: null,
+            mixamorigLeftForeArm: null,
+            mixamorigLeftHand: null
+        };
+
+        // --- 初始化呼叫 ---
+        init();
+
+        function init() {
+            container = document.getElementById('canvas-container');
+
+            // 1. 場景建立
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a0f);
+            scene.fog = new THREE.FogExp2(0x0a0a0f, 0.15);
+
+            // 2. 相機設定 (針對雙臂入鏡微調初始距離)
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            resetCamera('front');
+
+            // 3. 渲染器設定
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // 4. 光影設計
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight1 = new THREE.DirectionalLight(0x6366f1, 1.2); // 帶點科技藍的主光
+            dirLight1.position.set(5, 8, 5);
+            dirLight1.castShadow = true;
+            dirLight1.shadow.mapSize.width = 2048;
+            dirLight1.shadow.mapSize.height = 2048;
+            scene.add(dirLight1);
+
+            const dirLight2 = new THREE.DirectionalLight(0xff007f, 0.5); // 側邊補桃紅霓虹光
+            dirLight2.position.set(-5, 3, -2);
+            scene.add(dirLight2);
+
+            const floorGrid = new THREE.GridHelper(20, 20, 0x6366f1, 0x222233);
+            floorGrid.position.y = 0;
+            scene.add(floorGrid);
+
+            // 5. 視角控制器 (OrbitControls)
+            orbitControls = new OrbitControls(camera, renderer.domElement);
+            orbitControls.enableDamping = true;
+            orbitControls.dampingFactor = 0.05;
+            orbitControls.target.set(0, 1.2, 0); // 聚焦在機器人胸腔/肩膀中心高度
+            orbitControls.update();
+
+            // 6. 骨骼旋轉控制器 (TransformControls)
+            transformControls = new TransformControls(camera, renderer.domElement);
+            transformControls.setMode('rotate'); // Tutting 核心為旋轉控制
+            transformControls.setSpace('local'); // 嚴格限制在局部坐標系
+            transformControls.setSize(0.8);     // 調整控制軸大小避免擋住模型
+            scene.add(transformControls);
+
+            // 互斥邏輯：拖曳 Transform 控制軸時暫停 OrbitControls
+            transformControls.addEventListener('dragging-changed', (event) => {
+                orbitControls.enabled = !event.value;
+            });
+
+            // 7. 載入 Xbot 模型
+            const loader = new GLTFLoader();
+            loader.load(
+                'https://threejs.org/examples/models/gltf/Xbot.glb',
+                (gltf) => {
+                    robotModel = gltf.scene;
+                    
+                    // 開啟陰影投射
+                    robotModel.traverse((child) => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                            // 優化材質科技感
+                            if(child.material) {
+                                child.material.roughness = 0.4;
+                                child.material.metalness = 0.2;
+                            }
+                        }
+                        
+                        // 擷取指定的 Mixamo 雙臂 6 個關鍵骨骼節點
+                        if (child.isBone && joints.hasOwnProperty(child.name)) {
+                            joints[child.name] = child;
+                        }
+                    });
+
+                    scene.add(robotModel);
+                    
+                    // T-Pose 初始微調：讓雙臂平舉更適合 Tutting 起手式
+                    initTuttingPose();
+
+                    // 關閉 Loading 遮罩
+                    const loaderOverlay = document.getElementById('loading-overlay');
+                    loaderOverlay.style.opacity = '0';
+                    setTimeout(() => loaderOverlay.remove(), 500);
+                },
+                (xhr) => {
+                    if (xhr.total > 0) {
+                        const percent = Math.round((xhr.loaded / xhr.total) * 100);
+                        document.getElementById('loading-text').innerText = `正在載入 3D 機器人模型... ${percent}%`;
+                    }
+                },
+                (error) => {
+                    console.error('模型載入失敗:', error);
+                    document.getElementById('loading-text').innerText = '載入失敗，請重新整理網頁';
+                }
+            );
+
+            // 8. UI 事件監聽綁定
+            setupUIEventListeners();
+
+            // 9. 視窗縮放適應
+            window.addEventListener('resize', onWindowResize);
+
+            // 10. 開始渲染迴圈
+            animate();
+        }
+
+        // 初始姿勢調整 (讓雙臂呈標準水平以利幾何變換)
+        function initTuttingPose() {
+            // 使用 Quaternion 進行安全的基礎角度賦值
+            if (joints.mixamorigRightArm) {
+                joints.mixamorigRightArm.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2.3);
+            }
+            if (joints.mixamorigLeftArm) {
+                joints.mixamorigLeftArm.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2.3);
+            }
+        }
+
+        // UI 互動事件設定
+        function setupUIEventListeners() {
+            const jointSelect = document.getElementById('joint-select');
+            
+            // 下拉選單切換控制節點
+            jointSelect.addEventListener('change', (e) => {
+                const selectedJointName = e.target.value;
+                if (selectedJointName !== 'none' && joints[selectedJointName]) {
+                    // 將 TransformControls 附著到該骨骼物件上
+                    transformControls.attach(joints[selectedJointName]);
+                } else {
+                    transformControls.detach();
+                }
+            });
+
+            // 視角切換按鈕事件
+            document.getElementById('btn-front').addEventListener('click', () => resetCamera('front'));
+            document.getElementById('btn-side').addEventListener('click', () => resetCamera('side'));
+            document.getElementById('btn-top').addEventListener('click', () => resetCamera('top'));
+        }
+
+        // 精準視角切換控制 (含雙臂完整入鏡微調)
+        function resetCamera(view) {
+            const targetY = 1.2; // 聚焦在肩膀與胸口高度
+            
+            if (orbitControls) {
+                orbitControls.target.set(0, targetY, 0);
+            }
+
+            switch (view) {
+                case 'front':
+                    camera.position.set(0, targetY, 2.2); // 正面：拉近距離凸顯手部幾何
+                    break;
+                case 'side':
+                    camera.position.set(2.2, targetY, 0); // 絕對右側面
+                    break;
+                case 'top':
+                    camera.position.set(0, targetY + 2.0, 0.01); // 俯視：微調 Z 軸防萬向鎖
+                    break;
+            }
+            
+            if (orbitControls) {
+                orbitControls.update();
+            }
+        }
+
+        // 視窗尺寸改變
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // 渲染與更新迴圈
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 更新相機軌道控制器
+            orbitControls.update();
+
+            // 渲染場景
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
